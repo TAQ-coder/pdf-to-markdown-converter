@@ -3,18 +3,6 @@ const nextConfig = {
   // experimental.serverComponentsExternalPackages を serverExternalPackages に変更
   serverExternalPackages: ['canvas', 'pdfjs-dist'],
   
-  // Vercelでのファイルサイズ制限を回避するための設定
-  experimental: {
-    // 必要に応じて他のexperimental設定をここに追加
-  },
-  
-  // API routesのbody parser制限を拡張
-  api: {
-    bodyParser: {
-      sizeLimit: '50mb',
-    },
-  },
-  
   // Webpack設定でpdf.jsの問題を解決
   webpack: (config, { isServer }) => {
     if (isServer) {
