@@ -7,7 +7,10 @@
   },
   "regions": ["hnd1"],
   "framework": "nextjs",
-  "buildCommand": "npm run build",
-  "devCommand": "npm run dev",
-  "installCommand": "npm install"
+  "rewrites": [
+    {
+      "source": "/api/convert-pdf",
+      "destination": "/api/convert-pdf"
+    }
+  ]
 }

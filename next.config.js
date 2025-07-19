@@ -3,12 +3,7 @@ const nextConfig = {
   experimental: {
     serverComponentsExternalPackages: ['pdf-parse']
   },
-  api: {
-    bodyParser: {
-      sizeLimit: '100mb',
-    },
-    responseLimit: false,
-  }
+  // APIルートの設定を削除（App Routerでは無効）
 }
 
 module.exports = nextConfig

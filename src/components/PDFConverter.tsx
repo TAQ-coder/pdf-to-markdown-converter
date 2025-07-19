@@ -25,7 +25,18 @@ const PDFConverter: React.FC = () => {
   const [uploadProgress, setUploadProgress] = useState<UploadProgress>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB
+  const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MBに変更
+
+// ファイル選択時のメッセージも更新
+<p className="text-sm text-gray-500">
+  最大50MB、複数ファイル対応
+</p>
+
+// エラーメッセージも更新
+if (file.size > MAX_FILE_SIZE) {
+  alert(`${file.name} は50MBを超えています。`);
+  return false;
+}
 
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     if (!event.target.files) return;
