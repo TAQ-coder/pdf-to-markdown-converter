@@ -1,0 +1,8 @@
+{
+  "functions": {
+    "src/app/api/convert-pdf/route.ts": {
+      "maxDuration": 300
+    }
+  },
+  "regions": ["nrt1"]
+}
