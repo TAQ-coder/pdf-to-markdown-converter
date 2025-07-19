@@ -25,18 +25,7 @@ const PDFConverter: React.FC = () => {
   const [uploadProgress, setUploadProgress] = useState<UploadProgress>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MBに変更
-
-// ファイル選択時のメッセージも更新
-<p className="text-sm text-gray-500">
-  最大50MB、複数ファイル対応
-</p>
-
-// エラーメッセージも更新
-if (file.size > MAX_FILE_SIZE) {
-  alert(`${file.name} は50MBを超えています。`);
-  return false;
-}
+  const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
 
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     if (!event.target.files) return;
@@ -47,7 +36,7 @@ if (file.size > MAX_FILE_SIZE) {
     
     const validFiles = selectedFiles.filter(file => {
       if (file.size > MAX_FILE_SIZE) {
-        alert(`${file.name} は100MBを超えています。`);
+        alert(`${file.name} は50MBを超えています。より小さなファイルを選択してください。`);
         return false;
       }
       return true;
@@ -66,7 +55,7 @@ if (file.size > MAX_FILE_SIZE) {
     
     const validFiles = droppedFiles.filter(file => {
       if (file.size > MAX_FILE_SIZE) {
-        alert(`${file.name} は100MBを超えています。`);
+        alert(`${file.name} は50MBを超えています。より小さなファイルを選択してください。`);
         return false;
       }
       return true;
@@ -110,17 +99,30 @@ if (file.size > MAX_FILE_SIZE) {
               pages: response.pages,
               processingTime: response.processingTime
             });
-          } catch (error) {
-            reject(new Error('Invalid server response'));
+          } catch (parseError) {
+            console.error('Response parsing error:', parseError);
+            reject(new Error('サーバーからの応答を解析できませんでした'));
           }
         } else {
-          const errorResponse = JSON.parse(xhr.responseText);
-          reject(new Error(errorResponse.error || `Server error: ${xhr.status}`));
+          try {
+            const errorResponse = JSON.parse(xhr.responseText);
+            reject(new Error(errorResponse.error || `サーバーエラー: ${xhr.status}`));
+          } catch (parseError) {
+            console.error('Error response parsing error:', parseError);
+            reject(new Error(`サーバーエラー: ${xhr.status} - ${xhr.statusText}`));
+          }
         }
       };
 
-      xhr.onerror = () => reject(new Error('Network error'));
-      xhr.ontimeout = () => reject(new Error('Request timeout'));
+      xhr.onerror = () => {
+        console.error('Network error occurred');
+        reject(new Error('ネットワークエラーが発生しました'));
+      };
+      
+      xhr.ontimeout = () => {
+        console.error('Request timeout');
+        reject(new Error('リクエストがタイムアウトしました'));
+      };
       
       xhr.timeout = 300000; // 5分
       xhr.open('POST', '/api/convert-pdf');
@@ -144,11 +146,12 @@ if (file.size > MAX_FILE_SIZE) {
         newResults.push(result);
         
         setUploadProgress(prev => ({ ...prev, [file.name]: 100 }));
-      } catch (error) {
+      } catch (conversionError) {
+        console.error(`Conversion error for ${file.name}:`, conversionError);
         newResults.push({
           filename: file.name,
           status: 'error',
-          error: error instanceof Error ? error.message : 'Unknown error',
+          error: conversionError instanceof Error ? conversionError.message : '不明なエラーが発生しました',
           size: file.size
         });
       }
@@ -181,7 +184,7 @@ if (file.size > MAX_FILE_SIZE) {
             PDF to Markdown Converter
           </h1>
           <p className="text-gray-600">
-            最大100MBのPDFファイルをMarkdown形式に変換
+            最大50MBのPDFファイルをMarkdown形式に変換
           </p>
         </div>
 
@@ -190,12 +193,13 @@ if (file.size > MAX_FILE_SIZE) {
           <div className="flex items-start">
             <Info className="h-5 w-5 text-blue-600 mr-2 mt-0.5" />
             <div>
-              <h3 className="font-semibold text-blue-900 mb-2">大容量PDF対応</h3>
+              <h3 className="font-semibold text-blue-900 mb-2">対応機能</h3>
               <ul className="text-sm text-blue-800 space-y-1">
-                <li>• 最大100MBのPDFファイルに対応</li>
+                <li>• 最大50MBのPDFファイルに対応</li>
                 <li>• サーバーサイド処理で高速変換</li>
                 <li>• 複数ファイルの同時処理</li>
                 <li>• リアルタイム進捗表示</li>
+                <li>• 汎用的な構造認識とMarkdown変換</li>
               </ul>
             </div>
           </div>
@@ -213,7 +217,7 @@ if (file.size > MAX_FILE_SIZE) {
             PDFファイルをドラッグ&ドロップするか、クリックして選択
           </p>
           <p className="text-sm text-gray-500">
-            最大100MB、複数ファイル対応
+            最大50MB、複数ファイル対応
           </p>
           <input
             ref={fileInputRef}
@@ -328,7 +332,7 @@ if (file.size > MAX_FILE_SIZE) {
                         <summary className="cursor-pointer text-blue-600 hover:text-blue-800">
                           プレビューを表示
                         </summary>
-                        <pre className="mt-2 p-3 bg-white border rounded text-xs overflow-auto max-h-40">
+                        <pre className="mt-2 p-3 bg-white border rounded text-xs overflow-auto max-h-40 whitespace-pre-wrap">
                           {result.markdown.substring(0, 800)}...
                         </pre>
                       </details>
@@ -339,6 +343,29 @@ if (file.size > MAX_FILE_SIZE) {
             </div>
           </div>
         )}
+
+        {/* 技術情報 */}
+        <div className="mt-8 grid md:grid-cols-2 gap-6">
+          <div className="p-6 bg-green-50 rounded-lg">
+            <h3 className="text-lg font-semibold mb-3 text-green-900">変換機能</h3>
+            <ul className="space-y-2 text-sm text-green-800">
+              <li>• 汎用的な文書構造認識</li>
+              <li>• 見出し・リスト・表の自動検出</li>
+              <li>• 多言語対応（日本語・英語等）</li>
+              <li>• 可読性を重視したMarkdown出力</li>
+            </ul>
+          </div>
+          
+          <div className="p-6 bg-purple-50 rounded-lg">
+            <h3 className="text-lg font-semibold mb-3 text-purple-900">技術仕様</h3>
+            <ul className="space-y-2 text-sm text-purple-800">
+              <li>• Next.js + TypeScript</li>
+              <li>• PDF.js による高精度解析</li>
+              <li>• Vercel Edge Functions</li>
+              <li>• クライアントサイド進捗表示</li>
+            </ul>
+          </div>
+        </div>
       </div>
     </div>
   );
