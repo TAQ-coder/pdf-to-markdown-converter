@@ -1,374 +1,378 @@
 'use client';
 
-import React, { useState, useRef } from 'react';
-import { Upload, Download, FileText, AlertCircle, CheckCircle, Loader, Info } from 'lucide-react';
-import { formatFileSize, formatProcessingTime } from '@/utils/markdown';
+import { useState, useRef, useCallback } from 'react';
 
-interface ConversionResult {
-  filename: string;
+interface ConversionResponse {
+  success: boolean;
   markdown?: string;
-  status: 'success' | 'error';
-  size: number;
-  pages?: number;
-  processingTime?: number;
+  filename?: string;
   error?: string;
 }
 
-interface UploadProgress {
-  [filename: string]: number;
+interface ProgressState {
+  stage: string;
+  progress: number;
 }
 
-const PDFConverter: React.FC = () => {
-  const [files, setFiles] = useState<File[]>([]);
-  const [processing, setProcessing] = useState(false);
-  const [results, setResults] = useState<ConversionResult[]>([]);
-  const [uploadProgress, setUploadProgress] = useState<UploadProgress>({});
+export default function PDFConverter() {
+  const [converting, setConverting] = useState(false);
+  const [result, setResult] = useState<string>('');
+  const [error, setError] = useState<string>('');
+  const [fileName, setFileName] = useState<string>('');
+  const [dragActive, setDragActive] = useState(false);
+  const [progress, setProgress] = useState<ProgressState>({ stage: '', progress: 0 });
+  const [copySuccess, setCopySuccess] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
-
-  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
-    if (!event.target.files) return;
-    
-    const selectedFiles = Array.from(event.target.files).filter(
-      file => file.type === 'application/pdf'
-    );
-    
-    const validFiles = selectedFiles.filter(file => {
-      if (file.size > MAX_FILE_SIZE) {
-        alert(`${file.name} は50MBを超えています。より小さなファイルを選択してください。`);
-        return false;
-      }
-      return true;
-    });
-    
-    setFiles(validFiles);
-    setResults([]);
-    setUploadProgress({});
+  const resetState = () => {
+    setError('');
+    setResult('');
+    setFileName('');
+    setProgress({ stage: '', progress: 0 });
+    setCopySuccess(false);
   };
 
-  const handleDrop = (event: React.DragEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    const droppedFiles = Array.from(event.dataTransfer.files).filter(
-      file => file.type === 'application/pdf'
-    );
+  const validateFile = (file: File): string | null => {
+    const maxSize = 50 * 1024 * 1024; // 50MB
     
-    const validFiles = droppedFiles.filter(file => {
-      if (file.size > MAX_FILE_SIZE) {
-        alert(`${file.name} は50MBを超えています。より小さなファイルを選択してください。`);
-        return false;
-      }
-      return true;
-    });
-    
-    setFiles(validFiles);
-    setResults([]);
-    setUploadProgress({});
-  };
-
-  const handleDragOver = (event: React.DragEvent<HTMLDivElement>) => {
-    event.preventDefault();
-  };
-
-  const processFileOnServer = async (file: File): Promise<ConversionResult> => {
-    const formData = new FormData();
-    formData.append('pdf', file);
-
-    return new Promise((resolve, reject) => {
-      const xhr = new XMLHttpRequest();
-      
-      xhr.upload.onprogress = (event) => {
-        if (event.lengthComputable) {
-          const percentComplete = (event.loaded / event.total) * 100;
-          setUploadProgress(prev => ({
-            ...prev,
-            [file.name]: percentComplete
-          }));
-        }
-      };
-
-      xhr.onload = () => {
-        if (xhr.status === 200) {
-          try {
-            const response = JSON.parse(xhr.responseText);
-            resolve({
-              filename: file.name,
-              markdown: response.markdown,
-              status: 'success',
-              size: file.size,
-              pages: response.pages,
-              processingTime: response.processingTime
-            });
-          } catch (parseError) {
-            console.error('Response parsing error:', parseError);
-            reject(new Error('サーバーからの応答を解析できませんでした'));
-          }
-        } else {
-          try {
-            const errorResponse = JSON.parse(xhr.responseText);
-            reject(new Error(errorResponse.error || `サーバーエラー: ${xhr.status}`));
-          } catch (parseError) {
-            console.error('Error response parsing error:', parseError);
-            reject(new Error(`サーバーエラー: ${xhr.status} - ${xhr.statusText}`));
-          }
-        }
-      };
-
-      xhr.onerror = () => {
-        console.error('Network error occurred');
-        reject(new Error('ネットワークエラーが発生しました'));
-      };
-      
-      xhr.ontimeout = () => {
-        console.error('Request timeout');
-        reject(new Error('リクエストがタイムアウトしました'));
-      };
-      
-      xhr.timeout = 300000; // 5分
-      xhr.open('POST', '/api/convert-pdf');
-      xhr.send(formData);
-    });
-  };
-
-  const processFiles = async () => {
-    if (files.length === 0) return;
-
-    setProcessing(true);
-    setResults([]);
-
-    const newResults: ConversionResult[] = [];
-
-    for (const file of files) {
-      try {
-        setUploadProgress(prev => ({ ...prev, [file.name]: 0 }));
-        
-        const result = await processFileOnServer(file);
-        newResults.push(result);
-        
-        setUploadProgress(prev => ({ ...prev, [file.name]: 100 }));
-      } catch (conversionError) {
-        console.error(`Conversion error for ${file.name}:`, conversionError);
-        newResults.push({
-          filename: file.name,
-          status: 'error',
-          error: conversionError instanceof Error ? conversionError.message : '不明なエラーが発生しました',
-          size: file.size
-        });
-      }
+    if (file.size > maxSize) {
+      return 'ファイルサイズが大きすぎます。50MB以下のファイルをアップロードしてください。';
     }
 
-    setResults(newResults);
-    setProcessing(false);
+    if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
+      return 'PDFファイルのみサポートしています。';
+    }
+
+    return null;
   };
 
-  const downloadMarkdown = (result: ConversionResult) => {
-    if (!result.markdown) return;
+  const updateProgress = (stage: string, progress: number) => {
+    setProgress({ stage, progress });
+  };
+
+  const handleFileUpload = async (file: File) => {
+    resetState();
     
-    const blob = new Blob([result.markdown], { type: 'text/markdown' });
+    const validationError = validateFile(file);
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+
+    setConverting(true);
+    setFileName(file.name);
+
+    try {
+      updateProgress('ファイルを準備中...', 10);
+      
+      const formData = new FormData();
+      formData.append('file', file);
+
+      updateProgress('サーバーにアップロード中...', 30);
+
+      const response = await fetch('/api/convert-pdf', {
+        method: 'POST',
+        body: formData,
+      });
+
+      updateProgress('レスポンスを処理中...', 70);
+
+      // レスポンスのContent-Typeをチェック
+      const contentType = response.headers.get('content-type');
+      
+      if (!response.ok) {
+        // エラーレスポンスの処理
+        let errorMessage = `サーバーエラー: ${response.status}`;
+        
+        if (contentType && contentType.includes('application/json')) {
+          try {
+            const errorData = await response.json();
+            errorMessage = errorData.error || errorMessage;
+          } catch (parseError) {
+            console.error('エラーレスポンスのパース失敗:', parseError);
+          }
+        } else {
+          // JSONでない場合（例：413エラーでHTMLが返される場合）
+          const textResponse = await response.text();
+          console.error('非JSONレスポンス:', textResponse);
+          
+          if (response.status === 413) {
+            errorMessage = 'ファイルサイズが大きすぎます。より小さなファイルをお試しください。';
+          } else if (response.status === 504) {
+            errorMessage = 'リクエストがタイムアウトしました。より小さなファイルをお試しください。';
+          } else if (response.status === 502) {
+            errorMessage = 'サーバーエラーが発生しました。しばらく待ってから再試行してください。';
+          }
+        }
+        
+        throw new Error(errorMessage);
+      }
+
+      // 成功レスポンスの処理
+      if (!contentType || !contentType.includes('application/json')) {
+        throw new Error('サーバーから無効なレスポンスが返されました。');
+      }
+
+      updateProgress('変換結果を処理中...', 90);
+      
+      const data: ConversionResponse = await response.json();
+      
+      if (data.success && data.markdown) {
+        setResult(data.markdown);
+        updateProgress('変換完了！', 100);
+      } else {
+        throw new Error(data.error || '変換に失敗しました。');
+      }
+
+    } catch (fetchError) {
+      console.error('変換エラー:', fetchError);
+      setError(fetchError instanceof Error ? fetchError.message : '不明なエラーが発生しました。');
+    } finally {
+      setConverting(false);
+      setTimeout(() => setProgress({ stage: '', progress: 0 }), 2000);
+    }
+  };
+
+  const handleDrag = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  }, []);
+
+  const handleDragIn = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.dataTransfer.items && e.dataTransfer.items.length > 0) {
+      setDragActive(true);
+    }
+  }, []);
+
+  const handleDragOut = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+  }, []);
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      const file = e.dataTransfer.files[0];
+      handleFileUpload(file);
+      e.dataTransfer.clearData();
+    }
+  }, []);
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    e.preventDefault();
+    const files = e.target.files;
+    if (files && files.length > 0) {
+      handleFileUpload(files[0]);
+    }
+  };
+
+  const openFileSelector = () => {
+    fileInputRef.current?.click();
+  };
+
+  const copyToClipboard = async () => {
+    try {
+      await navigator.clipboard.writeText(result);
+      setCopySuccess(true);
+      setTimeout(() => setCopySuccess(false), 2000);
+    } catch (err) {
+      console.error('クリップボードへのコピーに失敗:', err);
+      // フォールバック: テキストエリアを使用
+      const textArea = document.createElement('textarea');
+      textArea.value = result;
+      document.body.appendChild(textArea);
+      textArea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textArea);
+      setCopySuccess(true);
+      setTimeout(() => setCopySuccess(false), 2000);
+    }
+  };
+
+  const downloadMarkdown = () => {
+    const blob = new Blob([result], { type: 'text/markdown' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = result.filename.replace('.pdf', '.md');
+    a.download = fileName.replace('.pdf', '.md') || 'converted.md';
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
   };
 
+  const clearResult = () => {
+    resetState();
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
   return (
-    <div className="max-w-6xl mx-auto p-6 bg-gray-50 min-h-screen">
-      <div className="bg-white rounded-lg shadow-lg p-8">
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 py-8">
+      <div className="max-w-6xl mx-auto p-6">
         <div className="text-center mb-8">
-          <FileText className="mx-auto h-16 w-16 text-blue-600 mb-4" />
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">
+          <h1 className="text-4xl font-bold text-gray-800 mb-4">
             PDF to Markdown Converter
           </h1>
-          <p className="text-gray-600">
-            最大50MBのPDFファイルをMarkdown形式に変換
+          <p className="text-lg text-gray-600">
+            PDFファイルを高品質なMarkdownに変換します
           </p>
         </div>
-
-        {/* 機能説明 */}
-        <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-          <div className="flex items-start">
-            <Info className="h-5 w-5 text-blue-600 mr-2 mt-0.5" />
-            <div>
-              <h3 className="font-semibold text-blue-900 mb-2">対応機能</h3>
-              <ul className="text-sm text-blue-800 space-y-1">
-                <li>• 最大50MBのPDFファイルに対応</li>
-                <li>• サーバーサイド処理で高速変換</li>
-                <li>• 複数ファイルの同時処理</li>
-                <li>• リアルタイム進捗表示</li>
-                <li>• 汎用的な構造認識とMarkdown変換</li>
-              </ul>
+        
+        <div className="bg-white rounded-xl shadow-lg p-8 mb-8">
+          <div
+            className={`border-2 border-dashed rounded-xl p-12 text-center transition-all duration-300 ${
+              dragActive
+                ? 'border-blue-500 bg-blue-50'
+                : 'border-gray-300 hover:border-gray-400 hover:bg-gray-50'
+            } ${converting ? 'opacity-50 pointer-events-none' : ''}`}
+            onDragEnter={handleDragIn}
+            onDragLeave={handleDragOut}
+            onDragOver={handleDrag}
+            onDrop={handleDrop}
+          >
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".pdf"
+              onChange={handleFileChange}
+              className="hidden"
+              disabled={converting}
+            />
+            
+            <div className="text-gray-600">
+              <div className="mb-4">
+                <svg
+                  className="mx-auto h-16 w-16 text-gray-400"
+                  stroke="currentColor"
+                  fill="none"
+                  viewBox="0 0 48 48"
+                  aria-hidden="true"
+                >
+                  <path
+                    d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02"
+                    strokeWidth={2}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </div>
+              
+              <p className="text-xl mb-2 font-medium">
+                PDFファイルをここにドロップ
+              </p>
+              <p className="text-gray-500 mb-4">または</p>
+              
+              <button
+                onClick={openFileSelector}
+                disabled={converting}
+                className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                ファイルを選択
+              </button>
+              
+              <p className="text-sm text-gray-500 mt-4">
+                最大ファイルサイズ: 50MB | 対応形式: PDF
+              </p>
             </div>
           </div>
-        </div>
 
-        {/* ファイルアップロード */}
-        <div
-          className="border-2 border-dashed border-gray-300 rounded-lg p-12 text-center mb-6 hover:border-blue-400 transition-colors cursor-pointer"
-          onDrop={handleDrop}
-          onDragOver={handleDragOver}
-          onClick={() => fileInputRef.current?.click()}
-        >
-          <Upload className="mx-auto h-12 w-12 text-gray-400 mb-4" />
-          <p className="text-lg text-gray-600 mb-2">
-            PDFファイルをドラッグ&ドロップするか、クリックして選択
-          </p>
-          <p className="text-sm text-gray-500">
-            最大50MB、複数ファイル対応
-          </p>
-          <input
-            ref={fileInputRef}
-            type="file"
-            multiple
-            accept=".pdf"
-            onChange={handleFileSelect}
-            className="hidden"
-          />
-        </div>
-
-        {/* 選択されたファイル一覧 */}
-        {files.length > 0 && (
-          <div className="mb-6">
-            <h3 className="text-lg font-semibold mb-4">
-              選択されたファイル ({files.length}) - 
-              合計: {formatFileSize(files.reduce((sum, file) => sum + file.size, 0))}
-            </h3>
-            <div className="space-y-3">
-              {files.map((file, index) => (
-                <div key={index} className="p-4 bg-gray-50 rounded-lg">
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center">
-                      <FileText className="h-5 w-5 text-red-600 mr-3" />
-                      <div>
-                        <span className="text-sm font-medium">{file.name}</span>
-                        <div className="text-xs text-gray-500">
-                          {formatFileSize(file.size)}
-                        </div>
-                      </div>
-                    </div>
-                    {processing && uploadProgress[file.name] !== undefined && (
-                      <div className="text-sm text-blue-600">
-                        {uploadProgress[file.name].toFixed(1)}%
-                      </div>
-                    )}
-                  </div>
-                  
-                  {processing && uploadProgress[file.name] !== undefined && (
-                    <div className="w-full bg-gray-200 rounded-full h-2">
-                      <div
-                        className="bg-blue-600 h-2 rounded-full transition-all duration-300"
-                        style={{ width: `${uploadProgress[file.name]}%` }}
-                      />
-                    </div>
-                  )}
+          {converting && (
+            <div className="mt-8 p-6 bg-blue-50 rounded-lg">
+              <div className="text-center">
+                <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-blue-200 border-t-blue-600 mb-4"></div>
+                <p className="text-blue-800 font-medium mb-2">{progress.stage}</p>
+                
+                <div className="w-full bg-blue-200 rounded-full h-2 mb-2">
+                  <div
+                    className="bg-blue-600 h-2 rounded-full transition-all duration-500"
+                    style={{ width: `${progress.progress}%` }}
+                  ></div>
                 </div>
-              ))}
+                
+                <p className="text-sm text-blue-600">{progress.progress}%</p>
+              </div>
+            </div>
+          )}
+
+          {error && (
+            <div className="mt-8 bg-red-50 border border-red-200 text-red-800 px-6 py-4 rounded-lg">
+              <div className="flex items-center">
+                <svg className="h-5 w-5 text-red-400 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                </svg>
+                <p className="font-medium">{error}</p>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {result && (
+          <div className="bg-white rounded-xl shadow-lg p-8">
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-2xl font-semibold text-gray-800">変換結果</h2>
+              <div className="flex gap-3">
+                <button
+                  onClick={copyToClipboard}
+                  className={`px-4 py-2 rounded-lg font-medium transition-all duration-200 ${
+                    copySuccess
+                      ? 'bg-green-600 text-white'
+                      : 'bg-blue-600 text-white hover:bg-blue-700'
+                  }`}
+                >
+                  {copySuccess ? '✓ コピー済み' : 'クリップボードにコピー'}
+                </button>
+                
+                <button
+                  onClick={downloadMarkdown}
+                  className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium"
+                >
+                  ダウンロード
+                </button>
+                
+                <button
+                  onClick={clearResult}
+                  className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors font-medium"
+                >
+                  クリア
+                </button>
+              </div>
             </div>
             
-            <button
-              onClick={processFiles}
-              disabled={processing}
-              className="mt-4 w-full bg-green-600 text-white py-3 px-6 rounded-lg hover:bg-green-700 disabled:bg-gray-400 transition-colors flex items-center justify-center"
-            >
-              {processing ? (
-                <>
-                  <Loader className="animate-spin h-5 w-5 mr-2" />
-                  変換中...
-                </>
-              ) : (
-                '変換開始'
-              )}
-            </button>
-          </div>
-        )}
-
-        {/* 変換結果 */}
-        {results.length > 0 && (
-          <div>
-            <h3 className="text-lg font-semibold mb-4">変換結果</h3>
-            <div className="space-y-4">
-              {results.map((result, index) => (
-                <div key={index} className="border rounded-lg p-4 bg-gray-50">
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center">
-                      {result.status === 'success' ? (
-                        <CheckCircle className="h-5 w-5 text-green-600 mr-3" />
-                      ) : (
-                        <AlertCircle className="h-5 w-5 text-red-600 mr-3" />
-                      )}
-                      <div>
-                        <p className="font-medium">{result.filename}</p>
-                        <div className="text-sm text-gray-600">
-                          {result.status === 'success' ? (
-                            <span>
-                              {result.pages}ページ • {formatFileSize(result.size)}
-                              {result.processingTime && (
-                                <> • 処理時間: {formatProcessingTime(result.processingTime)}</>
-                              )}
-                            </span>
-                          ) : (
-                            <span className="text-red-600">{result.error}</span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                    {result.status === 'success' && (
-                      <button
-                        onClick={() => downloadMarkdown(result)}
-                        className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 transition-colors flex items-center text-sm"
-                      >
-                        <Download className="h-4 w-4 mr-2" />
-                        ダウンロード
-                      </button>
-                    )}
-                  </div>
-                  
-                  {result.status === 'success' && result.markdown && (
-                    <div className="mt-3">
-                      <details className="text-sm">
-                        <summary className="cursor-pointer text-blue-600 hover:text-blue-800">
-                          プレビューを表示
-                        </summary>
-                        <pre className="mt-2 p-3 bg-white border rounded text-xs overflow-auto max-h-40 whitespace-pre-wrap">
-                          {result.markdown.substring(0, 800)}...
-                        </pre>
-                      </details>
-                    </div>
-                  )}
-                </div>
-              ))}
+            <div className="border rounded-lg bg-gray-50">
+              <div className="border-b bg-gray-100 px-4 py-2 rounded-t-lg">
+                <p className="text-sm text-gray-600 font-medium">
+                  {fileName} → {fileName.replace('.pdf', '.md')}
+                </p>
+              </div>
+              
+              <div className="p-4 max-h-96 overflow-auto">
+                <pre className="whitespace-pre-wrap text-sm text-gray-800 font-mono leading-relaxed">
+                  {result}
+                </pre>
+              </div>
+            </div>
+            
+            <div className="mt-4 p-4 bg-blue-50 rounded-lg">
+              <p className="text-sm text-blue-800">
+                <strong>ヒント:</strong> 変換されたMarkdownをさらに編集したい場合は、
+                お好みのMarkdownエディタにコピーしてご利用ください。
+              </p>
             </div>
           </div>
         )}
 
-        {/* 技術情報 */}
-        <div className="mt-8 grid md:grid-cols-2 gap-6">
-          <div className="p-6 bg-green-50 rounded-lg">
-            <h3 className="text-lg font-semibold mb-3 text-green-900">変換機能</h3>
-            <ul className="space-y-2 text-sm text-green-800">
-              <li>• 汎用的な文書構造認識</li>
-              <li>• 見出し・リスト・表の自動検出</li>
-              <li>• 多言語対応（日本語・英語等）</li>
-              <li>• 可読性を重視したMarkdown出力</li>
-            </ul>
-          </div>
-          
-          <div className="p-6 bg-purple-50 rounded-lg">
-            <h3 className="text-lg font-semibold mb-3 text-purple-900">技術仕様</h3>
-            <ul className="space-y-2 text-sm text-purple-800">
-              <li>• Next.js + TypeScript</li>
-              <li>• PDF.js による高精度解析</li>
-              <li>• Vercel Edge Functions</li>
-              <li>• クライアントサイド進捗表示</li>
-            </ul>
-          </div>
+        <div className="mt-8 text-center text-gray-500 text-sm">
+          <p>© 2024 PDF to Markdown Converter. 高品質な変換をお楽しみください。</p>
         </div>
       </div>
     </div>
   );
-};
-
-export default PDFConverter;
+}

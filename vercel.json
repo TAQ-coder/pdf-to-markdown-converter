@@ -1,16 +1,13 @@
 {
   "functions": {
     "src/app/api/convert-pdf/route.ts": {
-      "maxDuration": 300,
-      "memory": 1024
+      "maxDuration": 30
     }
   },
-  "regions": ["hnd1"],
-  "framework": "nextjs",
   "rewrites": [
     {
-      "source": "/api/convert-pdf",
-      "destination": "/api/convert-pdf"
+      "source": "/pdf.worker.js",
+      "destination": "/_next/static/chunks/pdf.worker.js"
     }
   ]
 }
